@@ -1,0 +1,16 @@
+# Node / Web
+node_modules/
+dist/
+.env
+.env.local
+*.log
+
+# SQLite
+*.db
+*.db-journal
+*.sqlite
+
+# Edytory i system
+.DS_Store
+.vscode/
+.idea/

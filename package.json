@@ -1,0 +1,25 @@
+{
+  "name": "drone-web",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"cyan,magenta\" \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Iterb-exe/drone-web.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Iterb-exe/drone-web/issues"
+  },
+  "homepage": "https://github.com/Iterb-exe/drone-web#readme",
+  "devDependencies": {
+    "concurrently": "^10.0.6"
+  }
+}
