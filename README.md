@@ -1,18 +1,28 @@
 # Drone Ground Control Station (GCS) — Web
 
-A lightweight, real-time Ground Control Station (GCS) web application designed for telemetry acquisition, live 3D visualization, time-series plotting, and flight data persistence for an unmanned aerial vehicle (UAV / quadcopter).
 
-The system is organized as a lightweight monorepo comprising a Node.js hardware/telemetry bridge (WebSockets + SQLite) and a modern React operator dashboard (Vite + Tailwind CSS).
+
+A lightweight, real-time Ground Control Station (GCS) web application designed for telemetry acquisition, live attitude visualization, high-frequency time-series plotting, and post-flight mission debriefing for an unmanned aerial vehicle (UAV / quadcopter).
+
+
+
+The system is organized as a lightweight monorepo comprising a Node.js hardware/telemetry bridge (WebSockets) and a mobile-first React operator dashboard (Vite + Tailwind CSS v4 + uPlot + React Router).
+
+
 
 ---
 
+
+
 ## 🚀 Architecture Overview
+
+
 
 ```text
 
 drone-web/
 
-├── backend/            # Telemetry bridge server (Node.js + WebSockets + SQLite)
+├── backend/            # Telemetry bridge server (Node.js + WebSockets)
 
 │   ├── src/
 
@@ -22,13 +32,21 @@ drone-web/
 
 │   └── tsconfig.json
 
-├── frontend/           # Operator cockpit UI (React + TypeScript + Vite)
+├── frontend/           # Operator cockpit SPA (React 19 + TypeScript + Vite)
 
 │   ├── src/
 
-│   │   ├── App.tsx     # Main telemetry dashboard view
+│   │   ├── components/ # Reusable UI components (Layout, RealtimeChart)
 
-│   │   └── index.css   # Tailwind CSS v4 styling rules
+│   │   ├── context/    # TelemetryContext (WS connection, dual-rate throttling)
+
+│   │   ├── data/       # Historical session datasets (mockFlights pending SQLite)
+
+│   │   ├── pages/      # Views (Dashboard, MetricDetail, FlightOverview)
+
+│   │   ├── App.tsx     # Application router configuration
+
+│   │   └── index.css   # Tailwind CSS v4 & uPlot theme rules
 
 │   ├── package.json
 
@@ -42,45 +60,75 @@ drone-web/
 
 ```
 
+
+
 ### Technology Stack
 
-- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS v4, Lucide Icons, Three.js / `@react-three/fiber` (3D attitude indicator), `uPlot` (high-frequency Canvas charts).
 
-- **Backend:** Node.js, TypeScript, `ws` (native WebSockets), `better-sqlite3` (low-overhead flight database), `tsx` (TypeScript execute & watch runtime).
 
-- **Telemetry Streaming:** WebSockets (`ws://localhost:8080`) streaming at 20 Hz (50 ms packet intervals).
+- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS v4, `react-router-dom`, `lucide-react`, `uPlot` (high-frequency Canvas plotting), Three.js / `@react-three/fiber` (3D attitude indicator).
+
+- **Backend:** Node.js, TypeScript, `ws` (native WebSockets), `tsx` (TypeScript runtime watch).
+
+- **Key Architectural Features:** 
+
+  - **Mobile-First Design:** Responsive layout adapting fluidly from smartphones and tablets to wide multi-monitor desktop stations.
+
+  - **Dual-Rate Telemetry Stream:** High-frequency 20 Hz (50 ms) data pump dedicated to canvas charts, coupled with a 2.5 Hz (400 ms) throttled state for jitter-free textual metric readouts.
+
+  - **Shared Contract:** Zero-overhead type sharing across backend and frontend via `shared/types.ts`.
+
+
 
 ---
+
+
 
 ## 📡 Telemetry Protocol Contract
 
-Both frontend and backend rely on a shared single source of truth defined in `shared/types.ts`:
+
+
+Both frontend and backend rely on the strict single source of truth defined in `shared/types.ts`:
+
+
 
 ```typescript
+
 export interface TelemetryPacket {
-  timestampMs: number; // Elapsed flight controller uptime (ms)
 
-  roll: number; // Attitude roll in degrees (-180 to 180)
+  timestampMs: number;    // Elapsed flight controller uptime (ms)
 
-  pitch: number; // Attitude pitch in degrees (-90 to 90)
+  roll: number;           // Attitude roll in degrees (-180 to 180)
 
-  yaw: number; // Attitude yaw in degrees (0 to 360)
+  pitch: number;          // Attitude pitch in degrees (-90 to 90)
 
-  altitude: number; // Barometric altitude in meters
+  yaw: number;            // Attitude yaw in degrees (0 to 360)
+
+  altitude: number;       // Barometric altitude in meters (AGL)
 
   batteryVoltage: number; // 4S LiPo battery pack voltage (14.0 V - 16.8 V)
 
-  isArmed: boolean; // Motor arm state
+  isArmed: boolean;       // Motor arm state
 
-  failsafe: boolean; // Active failsafe emergency flag
+  failsafe: boolean;      // Active failsafe emergency flag
+
 }
+
 ```
+
+
 
 ---
 
+
+
 ## 📋 Prerequisites
 
+
+
 Ensure the following tools are installed on your development machine:
+
+
 
 - **Node.js**: `v20.x` or later (LTS recommended)
 
@@ -88,7 +136,11 @@ Ensure the following tools are installed on your development machine:
 
 - **Git**
 
+
+
 Verify your environment versions:
+
+
 
 ```bash
 
@@ -100,11 +152,21 @@ git --version
 
 ```
 
+
+
 ---
+
+
 
 ## 🛠️ Step-by-Step Installation
 
+
+
 ### 1. Clone the Repository
+
+
+
+Using SSH (recommended on Linux/macOS):
 
 ```bash
 
@@ -114,19 +176,37 @@ cd drone-web
 
 ```
 
-### 2. Install Dependencies
 
-Because the project uses independent `package.json` manifests for root orchestration, backend, and frontend, install dependencies across all three layers:
+
+Using HTTPS (recommended on Windows):
 
 ```bash
 
-# 1. Install root dependencies (concurrently process runner)
+git clone https://github.com/Iterb-exe/drone-web.git
+
+cd drone-web
+
+```
+
+
+
+### 2. Install Dependencies
+
+
+
+Because the project uses independent `package.json` manifests for root orchestration, backend, and frontend, install dependencies across all three layers:
+
+
+
+```bash
+
+# 1. Install root dependencies (concurrently orchestrator)
 
 npm install
 
 
 
-# 2. Install backend dependencies (ws, better-sqlite3, tsx)
+# 2. Install backend dependencies (ws, tsx, typescript)
 
 cd backend
 
@@ -136,7 +216,7 @@ cd ..
 
 
 
-# 3. Install frontend dependencies (React, Vite, Tailwind, 3D & chart libraries)
+# 3. Install frontend dependencies (React, Vite, Tailwind v4, Router, uPlot, Three)
 
 cd frontend
 
@@ -146,11 +226,19 @@ cd ..
 
 ```
 
+
+
 ---
+
+
 
 ## ▶️ Running the Development Environment
 
+
+
 From the root `drone-web` directory, execute:
+
+
 
 ```bash
 
@@ -158,13 +246,21 @@ npm run dev
 
 ```
 
-This starts both services concurrently with colored terminal output:
+
+
+This starts both services concurrently with unified terminal logs:
+
+
 
 - **Backend Bridge:** `ws://localhost:8080` (broadcasts simulated 20 Hz telemetry frames).
 
 - **Frontend Dashboard:** `http://localhost:5173` (Vite dev server with Hot Module Replacement).
 
+
+
 Open your browser and navigate to:
+
+
 
 ```text
 
@@ -172,58 +268,100 @@ http://localhost:5173
 
 ```
 
----
 
-## 🌟 Current Capabilities (Mock Mode)
-
-The station currently operates in **Mock Telemetry Mode**, allowing complete UI development independent of physical drone hardware:
-
-- **Real-time WebSocket Stream:** Backend continuously generates smooth trigonometric sinusoidal fluctuations for Roll, Pitch, Yaw, barometric altitude, and a realistic battery discharge slope for a 4S LiPo.
-
-- **Connection Health Monitor:** Visual status indicator displaying `Połączono (Live)` / `Rozłączono` in real time.
-
-- **Telemetry HUD Cards:** Instant rendering of battery voltage, barometric height, attitude angles, and ARM/DISARM motor status.
 
 ---
+
+
+
+## 🌟 Current Capabilities
+
+
+
+The station currently operates in **Mock Telemetry Mode**, allowing full UI and charting development independent of physical drone hardware:
+
+
+
+- **Live HUD Dashboard (`/`):** Instant overview of battery status (4S LiPo), barometric height, IMU attitude angles, and armed/failsafe status flags.
+
+- **Responsive Flight Log Table:** Overview of previous flight sessions (start time, end time, total duration, and completion status) formatted for both mobile cards and desktop tables.
+
+- **Deep Metric Views (`/metric/:metricId`):** Dedicated real-time 20 Hz `uPlot` charts for individual flight parameters with live summary strips (current, min, and max values).
+
+- **Post-Flight Analysis Report (`/flight/:flightId`):** In-depth mission debriefing view displaying aggregated statistics (average/maximum altitude, voltage sag, IMU angular dynamics) and multi-series synchronized historical charts.
+
+
+
+---
+
+
 
 ## 🔧 Troubleshooting & Common Issues
 
+
+
 ### 1. `Firefox can't establish a connection to ws://localhost:8080`
 
-- Check the backend terminal tab to ensure the server initialized successfully and did not crash on startup.
+- Check the terminal tab to ensure the backend process is running without errors.
 
-- Ensure port `8080` is not in use by another local process (`lsof -i :8080`).
+- Verify that port `8080` is not blocked or occupied by another process (`lsof -i :8080` on Linux, `netstat -ano | findstr :8080` on Windows).
 
-### 2. TypeScript Import Syntax Errors in Browser (`does not provide an export named...`)
+
+
+### 2. TypeScript Import Errors in Browser (`does not provide an export named...`)
 
 - When importing interfaces from `shared/types.ts` into frontend files, always use explicit type-only import syntax:
 
   ```typescript
+
   import type { TelemetryPacket } from "../../shared/types";
+
   ```
 
-  This ensures the Vite bundler completely strips the interface during bundling and prevents runtime module export lookup errors.
+  This ensures the Vite compiler strips the interface completely during bundling, avoiding runtime module resolution errors.
+
+
+
+### 3. Windows Native Build Errors (`node-gyp rebuild failed`)
+
+- Native C++ database drivers (e.g., `better-sqlite3`) require Visual Studio C++ Build Tools on Windows. The project currently isolates flight history in a pure TypeScript mock layer (`src/data/mockFlights.ts`) during prototyping to guarantee zero-friction cross-platform development.
+
+
 
 ---
 
+
+
 ## 🗺️ Development Roadmap
+
+
 
 - [x] Monorepo scaffold with concurrent development pipeline.
 
 - [x] High-frequency WebSocket telemetry bridge with mock packet generator.
 
-- [x] Real-time HUD cards for flight parameters.
+- [x] Responsive Mobile-First HUD cards for live flight metrics.
 
-- [ ] 3D attitude visualization utilizing `@react-three/fiber` (CAD quadcopter orientation).
+- [x] Real-time 20 Hz time-series charts using `uPlot` with dual-rate UI throttling.
 
-- [ ] High-performance time-series charts using `uPlot` (altitude profile and voltage curve).
+- [x] Multi-view routing (`/`, `/metric/:metricId`, `/flight/:flightId`) via `react-router-dom`.
 
-- [ ] Session flight logging to local SQLite database via `better-sqlite3`.
+- [x] Flight session history debriefing interface with min/max/average metrics.
+
+- [ ] 3D attitude visualization utilizing `@react-three/fiber` (CAD quadcopter orientation model).
+
+- [ ] Persistent flight logging to local SQLite database via cross-platform storage adapter.
 
 - [ ] Hardware UART integration using Node.js `serialport` for live STM32 flight controller telemetry.
 
+
+
 ---
 
+
+
 ## 📄 License
+
+
 
 This project is developed as part of an engineering diploma thesis. All rights reserved.
