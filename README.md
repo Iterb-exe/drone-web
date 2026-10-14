@@ -2,11 +2,11 @@
 
 
 
-A lightweight, real-time Ground Control Station (GCS) web application designed for telemetry acquisition, live attitude visualization, high-frequency time-series plotting, and post-flight mission debriefing for an unmanned aerial vehicle (UAV / quadcopter).
+A lightweight, real-time Ground Control Station (GCS) web application designed for telemetry acquisition, live 3D attitude and altitude visualization, high-frequency time-series plotting, and post-flight mission debriefing for an unmanned aerial vehicle (UAV / quadcopter).
 
 
 
-The system is organized as a lightweight monorepo comprising a Node.js hardware/telemetry bridge (WebSockets) and a mobile-first React operator dashboard (Vite + Tailwind CSS v4 + uPlot + React Router).
+The system is organized as a lightweight monorepo comprising a Node.js hardware/telemetry bridge (WebSockets) and a mobile-first React operator dashboard (Vite + Tailwind CSS v4 + Three.js + uPlot + React Router).
 
 
 
@@ -36,7 +36,7 @@ drone-web/
 
 │   ├── src/
 
-│   │   ├── components/ # Reusable UI components (Layout, RealtimeChart)
+│   │   ├── components/ # Reusable UI (Layout, RealtimeChart, DroneAttitude3D)
 
 │   │   ├── context/    # TelemetryContext (WS connection, dual-rate throttling)
 
@@ -66,7 +66,7 @@ drone-web/
 
 
 
-- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS v4, `react-router-dom`, `lucide-react`, `uPlot` (high-frequency Canvas plotting), Three.js / `@react-three/fiber` (3D attitude indicator).
+- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS v4, `react-router-dom`, `lucide-react`, `uPlot` (high-frequency Canvas plotting), Three.js / `@react-three/fiber` & `@react-three/drei` (1:1 metric scale 3D attitude & AGL altitude indicator).
 
 - **Backend:** Node.js, TypeScript, `ws` (native WebSockets), `tsx` (TypeScript runtime watch).
 
@@ -74,7 +74,11 @@ drone-web/
 
   - **Mobile-First Design:** Responsive layout adapting fluidly from smartphones and tablets to wide multi-monitor desktop stations.
 
-  - **Dual-Rate Telemetry Stream:** High-frequency 20 Hz (50 ms) data pump dedicated to canvas charts, coupled with a 2.5 Hz (400 ms) throttled state for jitter-free textual metric readouts.
+  - **Dual-Rate Telemetry Stream:** High-frequency 20 Hz (50 ms) data pump dedicated to canvas charts and 60 FPS 3D interpolation, coupled with a 2.5 Hz (400 ms) throttled state for jitter-free textual metric readouts.
+
+  - **Metric 3D Visualization ($50\text{ cm} \times 50\text{ cm} \times 50\text{ cm}$):** Procedural X-frame quadcopter scaled to realistic $0.5\text{ m}$ dimensions over a $4\text{ m} \times 4\text{ m}$ metric reference grid ($25\text{ cm}$ cells) with vertical AGL altitude drop-line projection and optional bounding-box overlay.
+
+  - **Interactive Flight Replay (Timeline Scrubber):** Full post-flight 3D reconstruction with Play/Pause/Speed ($1\times$, $2\times$, $5\times$) controls and synchronized crosshairs across historical `uPlot` charts.
 
   - **Shared Contract:** Zero-overhead type sharing across backend and frontend via `shared/types.ts`.
 
@@ -278,17 +282,19 @@ http://localhost:5173
 
 
 
-The station currently operates in **Mock Telemetry Mode**, allowing full UI and charting development independent of physical drone hardware:
+The station currently operates in **Mock Telemetry Mode**, allowing full UI, 3D, and charting development independent of physical drone hardware:
 
 
 
-- **Live HUD Dashboard (`/`):** Instant overview of battery status (4S LiPo), barometric height, IMU attitude angles, and armed/failsafe status flags.
+- **Live HUD Dashboard (`/`):** Instant overview of battery status (4S LiPo), barometric height, IMU attitude angles, armed/failsafe status flags, and a live 3D orientation/elevation viewport.
+
+- **3D Attitude & Altitude Indicator (`DroneAttitude3D`):** Real-time 60 FPS interpolated quadcopter model ($50\text{ cm} \times 50\text{ cm} \times 50\text{ cm}$ envelope) with spinning propellers when armed, Yaw lock toggle, $50\text{ cm}$ wireframe bounding box toggle, and vertical AGL height projection.
 
 - **Responsive Flight Log Table:** Overview of previous flight sessions (start time, end time, total duration, and completion status) formatted for both mobile cards and desktop tables.
 
 - **Deep Metric Views (`/metric/:metricId`):** Dedicated real-time 20 Hz `uPlot` charts for individual flight parameters with live summary strips (current, min, and max values).
 
-- **Post-Flight Analysis Report (`/flight/:flightId`):** In-depth mission debriefing view displaying aggregated statistics (average/maximum altitude, voltage sag, IMU angular dynamics) and multi-series synchronized historical charts.
+- **Post-Flight Analysis & 3D Replay (`/flight/:flightId`):** Mission debriefing view featuring an interactive timeline scrubber, 3D flight playback ($1\times$/$2\times$/$5\times$), aggregated session statistics, and click-to-seek synchronized historical charts.
 
 
 
@@ -348,7 +354,7 @@ The station currently operates in **Mock Telemetry Mode**, allowing full UI and 
 
 - [x] Flight session history debriefing interface with min/max/average metrics.
 
-- [ ] 3D attitude visualization utilizing `@react-three/fiber` (CAD quadcopter orientation model).
+- [x] 3D attitude & AGL altitude visualization utilizing `@react-three/fiber` ($50\text{ cm}$ scale quadcopter model + historical timeline replay).
 
 - [ ] Persistent flight logging to local SQLite database via cross-platform storage adapter.
 

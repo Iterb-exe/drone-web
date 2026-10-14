@@ -3,6 +3,7 @@ import { useParams, Link, Navigate } from "react-router-dom";
 import { ArrowLeft, Activity, Battery, Compass, ShieldAlert } from "lucide-react";
 import { useTelemetry } from "../context/TelemetryContext";
 import RealtimeChart, { type SeriesConfig } from "../components/RealtimeChart";
+import DroneAttitude3D from "../components/DroneAttitude3D";
 import type { TelemetryPacket } from "../../../shared/types";
 
 interface MetricPageConfig {
@@ -49,13 +50,13 @@ const METRIC_CONFIGS: Record<string, MetricPageConfig> = {
     ],
   },
   attitude: {
-    title: "Orientacja przestrzenna (Roll / Pitch)",
-    description: "Wykres wychyleń kątowych wokół osi podłużnej (Roll) oraz poprzecznej (Pitch).",
+    title: "Orientacja przestrzenna (Roll / Pitch / Yaw)",
+    description: "Wizualizacja 3D orientacji kadłuba oraz wykres wychyleń kątowych wokół osi IMU.",
     icon: Compass,
     iconColor: "text-indigo-400",
     yRange: [-20, 20],
     formatCurrentValue: (t) =>
-      `Roll: ${t.roll.toFixed(1)}° | Pitch: ${t.pitch.toFixed(1)}° | Yaw: ${t.yaw.toFixed(0)}°`,
+      `R: ${t.roll.toFixed(1)}° | P: ${t.pitch.toFixed(1)}° | Y: ${t.yaw.toFixed(0)}°`,
     series: [
       {
         label: "Roll",
@@ -113,7 +114,6 @@ export default function MetricDetail() {
 
   return (
     <div className="space-y-6">
-      {/* Nawigacja powrotna (Mobile-First) */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
           <Link
@@ -130,8 +130,7 @@ export default function MetricDetail() {
           <p className="text-xs sm:text-sm text-zinc-400">{config.description}</p>
         </div>
 
-        {/* Podgląd bieżącej wartości (odświeżany co 400 ms) */}
-        <div className="p-4 rounded-xl bg-zinc-900 border border-zinc-800 self-start sm:self-auto min-w-[180px]">
+        <div className="p-4 rounded-xl bg-zinc-900 border border-zinc-800 self-start sm:self-auto min-w-45">
           <span className="block text-xs text-zinc-400 mb-1">
             Aktualny odczyt
           </span>
@@ -141,7 +140,9 @@ export default function MetricDetail() {
         </div>
       </div>
 
-      {/* Wykres uPlot (20 Hz) */}
+      {/* Jeśli jesteśmy na podstronie attitude, renderujemy podgląd 3D nad wykresem */}
+      {metricId === "attitude" && <DroneAttitude3D />}
+
       <RealtimeChart series={config.series} yRange={config.yRange} />
     </div>
   );
