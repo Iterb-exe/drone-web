@@ -1,8 +1,18 @@
 @import "tailwindcss";
+@import "uplot/dist/uPlot.min.css";
 
 body {
   margin: 0;
   background-color: #09090b;
   color: #fafafa;
   font-family: system-ui, -apple-system, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.uplot {
+  font-family: system-ui, -apple-system, sans-serif !important;
+}
+.u-legend {
+  font-size: 12px !important;
+  color: #a1a1aa !important;
 }
