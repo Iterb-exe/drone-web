@@ -2,21 +2,36 @@ import { useEffect, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
-import { Compass, RotateCcw, ArrowUpDown, Box } from "lucide-react";
+import { Compass, RotateCcw, ArrowUpDown, Box, Eye } from "lucide-react";
 import { useTelemetry } from "../context/TelemetryContext";
 import type { TelemetryPacket } from "../../../shared/types";
 
-// Poziom ziemi w metrach (1 jednostka = 1 metr)
-const GROUND_Y = -0.35;
+// Poziom ziemi: y = 0.0 m (1 jednostka w Three.js = 1.0 metr w rzeczywistości)
+const GROUND_Y = 0;
 // Rozmiar gabarytowy drona: 0.50 m = 50 cm
 const DRONE_BOUNDS_M = 0.5;
+// Odległość od spodu płóz drona do środka jego układu współrzędnych
+const LANDING_GEAR_OFFSET_M = 0.045;
+
+/**
+ * Interpolacja kątowa po najkrótszym łuku okręgu.
+ * Zapobiega gwałtownemu obrotowi o 360 stopni przy przejściu 359° -> 0°.
+ */
+function lerpAngleRad(current: number, target: number, t: number): number {
+  const delta = Math.atan2(
+    Math.sin(target - current),
+    Math.cos(target - current)
+  );
+  return current + delta * t;
+}
 
 interface QuadcopterModelProps {
   targetTelemetry: React.MutableRefObject<TelemetryPacket | null>;
   lockYaw: boolean;
   enableAltitude3D: boolean;
   showBoundingBox: boolean;
-  maxAltitudeScale: number;
+  cameraFollowDrone: boolean;
+  controlsRef: React.MutableRefObject<any>;
 }
 
 function QuadcopterModel({
@@ -24,30 +39,31 @@ function QuadcopterModel({
   lockYaw,
   enableAltitude3D,
   showBoundingBox,
-  maxAltitudeScale,
+  cameraFollowDrone,
+  controlsRef,
 }: QuadcopterModelProps) {
   const droneGroupRef = useRef<THREE.Group>(null);
   const propRefs = useRef<(THREE.Mesh | null)[]>([]);
   const altitudeStemRef = useRef<THREE.Mesh>(null);
   const groundRingRef = useRef<THREE.Mesh>(null);
+  const prevCameraTargetYRef = useRef<number>(LANDING_GEAR_OFFSET_M);
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     if (!droneGroupRef.current) return;
 
     const packet = targetTelemetry.current;
     const rollDeg = packet ? packet.roll : 0;
     const pitchDeg = packet ? packet.pitch : 0;
     const yawDeg = packet && !lockYaw ? packet.yaw : 0;
-    const altitude = packet ? Math.max(0, packet.altitude) : 0;
+    const altitudeMeters = packet ? Math.max(0, packet.altitude) : 0;
     const isArmed = packet ? packet.isArmed : false;
 
-    // Skalowana wysokość w oknie 3D (od poziomu płyty startowej do +0.65 m w kadrze)
-    const normalizedAlt = Math.min(1, altitude / Math.max(1, maxAltitudeScale));
-    const targetY = enableAltitude3D
-      ? GROUND_Y + 0.04 + normalizedAlt * 0.65
-      : 0;
-
     const smoothing = Math.min(1, delta * 12);
+
+    // 1. Rzeczywista wysokość 1:1 w metrach (np. 21 m = 21.0 jednostek nad ziemią, czyli 42 długości drona 50 cm)
+    const targetY = enableAltitude3D
+      ? GROUND_Y + LANDING_GEAR_OFFSET_M + altitudeMeters
+      : GROUND_Y + LANDING_GEAR_OFFSET_M;
 
     droneGroupRef.current.position.y = THREE.MathUtils.lerp(
       droneGroupRef.current.position.y,
@@ -55,43 +71,63 @@ function QuadcopterModel({
       smoothing
     );
 
-    // Pionowa linia wysokości (Drop-line) i pierścień rzutowania (średnica 50 cm)
     const currentDroneY = droneGroupRef.current.position.y;
     const heightAboveGround = Math.max(0.005, currentDroneY - GROUND_Y);
 
+    // 2. Aktualizacja pionowej kolumny wysokości (od ziemi y=0 do spodu drona)
     if (altitudeStemRef.current) {
       altitudeStemRef.current.position.y = GROUND_Y + heightAboveGround / 2;
       altitudeStemRef.current.scale.set(1, heightAboveGround, 1);
     }
 
+    // Pierścień rzutowania na ziemi (średnica 50 cm = obrys drona)
     if (groundRingRef.current) {
-      const ringScale = Math.max(0.4, 1 - normalizedAlt * 0.45);
-      groundRingRef.current.scale.set(ringScale, ringScale, 1);
+      groundRingRef.current.position.y = GROUND_Y + 0.003;
     }
 
-    // Porządek rotacji lotniczej: Yaw (Y) -> Pitch (X) -> Roll (Z)
+    // 3. Płynne prowadzenie kamery za wznoszącym się dronem w skali 1:1
+    if (controlsRef.current) {
+      const desiredTargetY = cameraFollowDrone
+        ? currentDroneY
+        : Math.max(0.5, currentDroneY * 0.5);
+
+      const newTargetY = THREE.MathUtils.lerp(
+        prevCameraTargetYRef.current,
+        desiredTargetY,
+        smoothing
+      );
+      const deltaY = newTargetY - prevCameraTargetYRef.current;
+
+      controlsRef.current.target.y = newTargetY;
+      state.camera.position.y += deltaY;
+      prevCameraTargetYRef.current = newTargetY;
+      controlsRef.current.update();
+    }
+
+    // 4. Orientacja kątowa z interpolacją po najkrótszym łuku (brak obrotu przy 350° -> 0°)
     droneGroupRef.current.rotation.order = "YXZ";
 
     const targetPitch = THREE.MathUtils.degToRad(pitchDeg);
     const targetYaw = -THREE.MathUtils.degToRad(yawDeg);
     const targetRoll = -THREE.MathUtils.degToRad(rollDeg);
 
-    droneGroupRef.current.rotation.x = THREE.MathUtils.lerp(
+    droneGroupRef.current.rotation.x = lerpAngleRad(
       droneGroupRef.current.rotation.x,
       targetPitch,
       smoothing
     );
-    droneGroupRef.current.rotation.y = THREE.MathUtils.lerp(
+    droneGroupRef.current.rotation.y = lerpAngleRad(
       droneGroupRef.current.rotation.y,
       targetYaw,
       smoothing
     );
-    droneGroupRef.current.rotation.z = THREE.MathUtils.lerp(
+    droneGroupRef.current.rotation.z = lerpAngleRad(
       droneGroupRef.current.rotation.z,
       targetRoll,
       smoothing
     );
 
+    // 5. Obrót śmigieł
     if (isArmed) {
       propRefs.current.forEach((prop, idx) => {
         if (prop) {
@@ -102,8 +138,7 @@ function QuadcopterModel({
     }
   });
 
-  // Układ ramion X dopasowany do obrysu 50 cm x 50 cm (0.50 m x 0.50 m)
-  // Odległość silnika od środka: 0.21 m -> rozstaw osi silników X/Z ~ 0.30 m + śmigło 0.20 m = 0.50 m całkowitej szerokości
+  // Ramiona w układzie X dopasowane do gabarytu 50 cm x 50 cm (0.50 m x 0.50 m)
   const armLength = 0.21;
   const armAngles = [
     { angle: Math.PI / 4, isFront: true },
@@ -112,40 +147,78 @@ function QuadcopterModel({
     { angle: -Math.PI / 4, isFront: true },
   ];
 
+  // Znaczniki miarki wysokości w metrach (od 1 m do 35 m co 1 metr)
+  const rulerTicks = Array.from({ length: 35 }, (_, i) => i + 1);
+
   return (
     <>
-      {/* Słupek wysokości AGL */}
+      {/* Pionowa linia wysokości AGL od ziemi (0 m) do drona */}
       <mesh ref={altitudeStemRef} position={[0, GROUND_Y, 0]}>
-        <cylinderGeometry args={[0.004, 0.004, 1, 8]} />
-        <meshBasicMaterial color="#38bdf8" transparent opacity={0.5} />
+        <cylinderGeometry args={[0.005, 0.005, 1, 8]} />
+        <meshBasicMaterial color="#38bdf8" transparent opacity={0.6} />
       </mesh>
 
-      {/* Pierścień rzutowania 50 cm (promień 0.25 m) na siatce lądowiska */}
+      {/* Miarka metryczna 3D wzdłuż osi wznoszenia (podziałka co 1 m, szersza co 5 m) */}
+      <group position={[-0.32, GROUND_Y, 0]}>
+        {rulerTicks.map((meter) => {
+          const isMajor = meter % 5 === 0;
+          return (
+            <group key={meter} position={[0, meter, 0]}>
+              <mesh position={[isMajor ? 0.04 : 0.02, 0, 0]}>
+                <boxGeometry
+                  args={[isMajor ? 0.14 : 0.07, isMajor ? 0.01 : 0.005, 0.005]}
+                />
+                <meshBasicMaterial
+                  color={isMajor ? "#38bdf8" : "#52525b"}
+                  transparent
+                  opacity={isMajor ? 0.9 : 0.5}
+                />
+              </mesh>
+              {/* Pierścień pomocniczy co 5 metrów wysokości */}
+              {isMajor && (
+                <mesh
+                  rotation={[-Math.PI / 2, 0, 0]}
+                  position={[0.32, 0, 0]}
+                >
+                  <ringGeometry args={[0.24, 0.25, 32]} />
+                  <meshBasicMaterial
+                    color="#38bdf8"
+                    transparent
+                    opacity={0.2}
+                    side={THREE.DoubleSide}
+                  />
+                </mesh>
+              )}
+            </group>
+          );
+        })}
+      </group>
+
+      {/* Pierścień rzutowania 50 cm (promień 0.25 m) na płycie lądowiska (y = 0 m) */}
       <mesh
         ref={groundRingRef}
         rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, GROUND_Y + 0.002, 0]}
+        position={[0, GROUND_Y + 0.003, 0]}
       >
         <ringGeometry args={[0.22, 0.25, 48]} />
         <meshBasicMaterial
           color="#38bdf8"
           transparent
-          opacity={0.45}
+          opacity={0.55}
           side={THREE.DoubleSide}
         />
       </mesh>
 
-      {/* Grupa drona (wymiary rzeczywiste w metrach, mieści się w 0.5m x 0.5m x 0.5m) */}
+      {/* Model drona w skali rzeczywistej 1:1 (mieści się w sześcianie 0.5m x 0.5m x 0.5m) */}
       <group ref={droneGroupRef}>
-        {/* Siatka pomocnicza sześcianu 50 cm x 50 cm x 50 cm */}
         {showBoundingBox && (
           <mesh position={[0, 0, 0]}>
             <boxGeometry args={[DRONE_BOUNDS_M, DRONE_BOUNDS_M, DRONE_BOUNDS_M]} />
             <meshBasicMaterial
-              color="#38bdf8"
+              color="#fbbf24"
               wireframe
               transparent
-              opacity={0.25}
+              opacity={0.35}
             />
           </mesh>
         )}
@@ -162,7 +235,7 @@ function QuadcopterModel({
           <meshStandardMaterial color="#f59e0b" metalness={0.2} roughness={0.4} />
         </mesh>
 
-        {/* Podwozie / płozy (wysokość 4 cm) */}
+        {/* Podwozie / płozy */}
         <mesh position={[0.06, -0.03, 0]}>
           <boxGeometry args={[0.01, 0.03, 0.16]} />
           <meshStandardMaterial color="#3f3f46" />
@@ -192,7 +265,7 @@ function QuadcopterModel({
           />
         </mesh>
 
-        {/* 4 Ramiona, silniki BLDC i śmigła 8-calowe (20 cm) */}
+        {/* 4 Ramiona, silniki BLDC i śmigła (całkowita rozpiętość = 0.50 m = 50 cm) */}
         {armAngles.map((arm, idx) => {
           const x = Math.sin(arm.angle) * armLength;
           const z = -Math.cos(arm.angle) * armLength;
@@ -200,7 +273,6 @@ function QuadcopterModel({
 
           return (
             <group key={idx}>
-              {/* Ramię karbonowe */}
               <mesh
                 position={[x / 2, -0.004, z / 2]}
                 rotation={[0, -arm.angle, 0]}
@@ -213,7 +285,6 @@ function QuadcopterModel({
                 />
               </mesh>
 
-              {/* Silnik BLDC */}
               <mesh position={[x, 0.012, z]}>
                 <cylinderGeometry args={[0.03, 0.03, 0.028, 24]} />
                 <meshStandardMaterial
@@ -223,7 +294,6 @@ function QuadcopterModel({
                 />
               </mesh>
 
-              {/* Pierścień LED pod silnikiem */}
               <mesh position={[x, -0.006, z]}>
                 <cylinderGeometry args={[0.033, 0.033, 0.006, 24]} />
                 <meshStandardMaterial
@@ -233,7 +303,6 @@ function QuadcopterModel({
                 />
               </mesh>
 
-              {/* Śmigło (średnica 0.20 m = 20 cm -> całkowity obrys drona = 50 cm) */}
               <mesh
                 ref={(el) => {
                   propRefs.current[idx] = el;
@@ -264,13 +333,13 @@ interface DroneAttitude3DProps {
 export default function DroneAttitude3D({
   compact = false,
   overridePacket,
-  maxAltitudeScale = 15,
 }: DroneAttitude3DProps) {
   const { getHistory, subscribeChart, displayTelemetry } = useTelemetry();
   const latestPacketRef = useRef<TelemetryPacket | null>(null);
   const [lockYaw, setLockYaw] = useState(false);
   const [enableAltitude3D, setEnableAltitude3D] = useState(true);
   const [showBoundingBox, setShowBoundingBox] = useState(false);
+  const [cameraFollowDrone, setCameraFollowDrone] = useState(true);
   const controlsRef = useRef<any>(null);
 
   const isReplayMode = overridePacket !== undefined;
@@ -300,9 +369,36 @@ export default function DroneAttitude3D({
 
   const hudPacket = isReplayMode ? overridePacket : displayTelemetry;
 
+  const toggleCameraMode = () => {
+    setCameraFollowDrone((prev) => {
+      const next = !prev;
+      if (controlsRef.current) {
+        const alt = latestPacketRef.current?.altitude ?? 0;
+        const obj = controlsRef.current.object as THREE.Camera;
+        if (!next) {
+          // Widok całej kolumny wysokości z dystansu (widać ziemię i drona w skali 1:1)
+          const dist = Math.max(4, alt * 1.35);
+          obj.position.set(0, Math.max(1.5, alt * 0.5), dist);
+        } else {
+          // Zbliżenie na drona 50x50x50 cm
+          obj.position.set(0, alt + 0.5, 1.15);
+        }
+        controlsRef.current.update();
+      }
+      return next;
+    });
+  };
+
   const resetCamera = () => {
     if (controlsRef.current) {
-      controlsRef.current.reset();
+      const alt = enableAltitude3D
+        ? latestPacketRef.current?.altitude ?? 0
+        : 0;
+      const obj = controlsRef.current.object as THREE.Camera;
+      controlsRef.current.target.set(0, alt + LANDING_GEAR_OFFSET_M, 0);
+      obj.position.set(0, alt + 0.55, 1.15);
+      setCameraFollowDrone(true);
+      controlsRef.current.update();
     }
   };
 
@@ -314,12 +410,25 @@ export default function DroneAttitude3D({
           <Compass className="w-4 h-4 text-indigo-400" />
           <span className="text-xs sm:text-sm font-semibold text-zinc-200">
             {isReplayMode
-              ? "Rekonstrukcja 3D lotu (Skala 1:1 — 50x50x50 cm)"
-              : "Wizualizacja 3D na żywo (Skala 1:1 — 50x50x50 cm)"}
+              ? "Rekonstrukcja 3D (Skala rzeczywista 1:1 — Dron 50 cm)"
+              : "Wizualizacja 3D na żywo (Skala rzeczywista 1:1 — Dron 50 cm)"}
           </span>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={toggleCameraMode}
+            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
+              !cameraFollowDrone
+                ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                : "bg-zinc-800 text-zinc-300 border-zinc-700 hover:text-zinc-100"
+            }`}
+          >
+            <Eye className="w-3.5 h-3.5" />
+            {cameraFollowDrone ? "Kamera: Śledź drona" : "Kamera: Cała kolumna"}
+          </button>
+
           <button
             type="button"
             onClick={() => setShowBoundingBox((prev) => !prev)}
@@ -343,7 +452,7 @@ export default function DroneAttitude3D({
             }`}
           >
             <ArrowUpDown className="w-3.5 h-3.5" />
-            {enableAltitude3D ? "Wysokość: Wł." : "Wysokość: Wył."}
+            {enableAltitude3D ? "Wysokość 1:1: Wł." : "Wysokość 1:1: Wył."}
           </button>
 
           <button
@@ -365,29 +474,29 @@ export default function DroneAttitude3D({
             className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium border border-zinc-700 transition-colors cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Kamera</span>
+            <span className="hidden sm:inline">Reset</span>
           </button>
         </div>
       </div>
 
-      {/* Scena Three.js (Kamera dopasowana do modelu 0.5 m) */}
+      {/* Scena Three.js (1 jednostka = 1 metr, far = 200 m dla pełnego widoku wysokości) */}
       <div className={`relative w-full ${compact ? "h-64 sm:h-72" : "h-72 sm:h-96"}`}>
         <Canvas
-          camera={{ position: [0, 0.65, 1.15], fov: 42 }}
+          camera={{ position: [0, 0.55, 1.15], fov: 42, near: 0.05, far: 250 }}
           gl={{ antialias: true }}
         >
           <color attach="background" args={["#09090b"]} />
           <ambientLight intensity={0.75} />
-          <directionalLight position={[2, 4, 2]} intensity={1.2} />
-          <directionalLight position={[-2, -2, -2]} intensity={0.3} />
+          <directionalLight position={[5, 30, 10]} intensity={1.2} />
+          <directionalLight position={[-5, -10, -5]} intensity={0.3} />
 
-          {/* Siatka metryczna 4m x 4m (1 kratka = 25 cm, dron zajmuje 2x2 kratki = 50x50 cm) */}
+          {/* Siatka lądowiska 10m x 10m (1 kratka = 25 cm, dron zajmuje 2x2 kratki = 50x50 cm) */}
           <gridHelper
-            args={[4, 16, "#27272a", "#18181b"]}
+            args={[10, 40, "#27272a", "#18181b"]}
             position={[0, GROUND_Y, 0]}
           />
 
-          {/* Zewnętrzny okrąg strefy lądowiska (średnica 1 m) */}
+          {/* Okrąg lądowiska o średnicy 1.0 m na poziomie ziemi (y = 0 m) */}
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, GROUND_Y + 0.001, 0]}>
             <ringGeometry args={[0.48, 0.5, 64]} />
             <meshBasicMaterial color="#3f3f46" side={THREE.DoubleSide} />
@@ -398,14 +507,15 @@ export default function DroneAttitude3D({
             lockYaw={lockYaw}
             enableAltitude3D={enableAltitude3D}
             showBoundingBox={showBoundingBox}
-            maxAltitudeScale={maxAltitudeScale}
+            cameraFollowDrone={cameraFollowDrone}
+            controlsRef={controlsRef}
           />
 
           <OrbitControls
             ref={controlsRef}
             enablePan={false}
-            minDistance={0.55}
-            maxDistance={3.0}
+            minDistance={0.45}
+            maxDistance={60.0}
           />
         </Canvas>
 
@@ -413,8 +523,12 @@ export default function DroneAttitude3D({
         <div className="pointer-events-none absolute bottom-3 left-3 right-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-3 px-3 py-1.5 rounded-lg bg-zinc-950/85 border border-zinc-800 backdrop-blur-sm text-xs tabular-nums">
             <span>
-              <strong className="text-sky-400">Alt:</strong>{" "}
-              {hudPacket ? `${hudPacket.altitude.toFixed(2)} m` : "--"}
+              <strong className="text-sky-400">Alt (1:1):</strong>{" "}
+              {hudPacket
+                ? `${hudPacket.altitude.toFixed(2)} m (${(
+                    hudPacket.altitude / DRONE_BOUNDS_M
+                  ).toFixed(1)}x dron)`
+                : "--"}
             </span>
             <span className="text-zinc-700">|</span>
             <span>
@@ -434,7 +548,7 @@ export default function DroneAttitude3D({
           </div>
 
           <div className="flex items-center gap-3 px-3 py-1.5 rounded-lg bg-zinc-950/85 border border-zinc-800 backdrop-blur-sm text-[11px] text-zinc-400">
-            <span>Kratka siatki: 25 cm</span>
+            <span>Podziałka: co 1 m (pierścień co 5 m)</span>
             <span className="text-zinc-700">|</span>
             <span className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-sky-400" />

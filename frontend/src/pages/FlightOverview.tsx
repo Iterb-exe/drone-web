@@ -39,13 +39,23 @@ function RecordedFlightChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
   const onSelectRef = useRef(onSelectIndex);
-  onSelectRef.current = onSelectIndex;
+  const seriesRef = useRef(series);
+  const yRangeRef = useRef(yRange);
 
+  onSelectRef.current = onSelectIndex;
+  seriesRef.current = series;
+  yRangeRef.current = yRange;
+
+  // Inicjalizacja wykresu TYLKO przy zmianie zestawu próbek (lotu),
+  // dzięki czemu wykres nigdy nie jest niszczony w trakcie odtwarzania!
   useEffect(() => {
     if (!containerRef.current || samples.length === 0) return;
 
+    const currentSeries = seriesRef.current;
+    const currentYRange = yRangeRef.current;
+
     const timestamps = samples.map((p: TelemetryPacket) => p.timestampMs / 1000);
-    const values = series.map((s: SeriesConfig) =>
+    const values = currentSeries.map((s: SeriesConfig) =>
       samples.map((p: TelemetryPacket) => s.extract(p))
     );
     const data: uPlot.AlignedData = [timestamps, ...values];
@@ -53,9 +63,12 @@ function RecordedFlightChart({
     const opts: uPlot.Options = {
       width: containerRef.current.clientWidth,
       height: window.innerWidth < 640 ? 220 : 260,
+      cursor: {
+        focus: { prox: -1 },
+      },
       scales: {
         x: { time: false },
-        y: { range: yRange },
+        y: { range: currentYRange },
       },
       axes: [
         {
@@ -67,7 +80,7 @@ function RecordedFlightChart({
           stroke: "#71717a",
           grid: { stroke: "#27272a", width: 1 },
           values: (_u, vals) =>
-            vals.map((v) => `${v.toFixed(1)} ${series[0]?.unit ?? ""}`),
+            vals.map((v) => `${v.toFixed(1)} ${currentSeries[0]?.unit ?? ""}`),
         },
       ],
       series: [
@@ -75,7 +88,7 @@ function RecordedFlightChart({
           label: "Czas lotu",
           value: (_u, v) => (v != null ? `${v.toFixed(0)} s` : "--"),
         },
-        ...series.map((s: SeriesConfig, idx: number) => ({
+        ...currentSeries.map((s: SeriesConfig, idx: number) => ({
           label: `${s.label} (${s.unit})`,
           stroke: s.color,
           width: 2,
@@ -93,7 +106,6 @@ function RecordedFlightChart({
     const u = new uPlot(opts, data, containerRef.current);
     plotRef.current = u;
 
-    // Obsługa kliknięcia na wykres w celu przestawienia osi czasu
     const handleMouseDown = () => {
       if (u.cursor.idx != null) {
         onSelectRef.current(u.cursor.idx);
@@ -118,16 +130,16 @@ function RecordedFlightChart({
       u.destroy();
       plotRef.current = null;
     };
-  }, [samples, series, yRange]);
+  }, [samples]);
 
-  // Synchronizacja kursora wykresu z wybraną sekundą na osi czasu
+  // Lekka aktualizacja samego kursora (bez przebudowy DOM i bez skakania scrolla)
   useEffect(() => {
     const u = plotRef.current;
     if (!u || !samples[activeIndex] || u.bbox.width <= 0) return;
 
     const timeSec = samples[activeIndex].timestampMs / 1000;
     const leftPx = u.valToPos(timeSec, "x");
-    u.setCursor({ left: leftPx, top: 20 });
+    u.setCursor({ left: leftPx, top: 20 }, false);
   }, [activeIndex, samples]);
 
   return (
@@ -140,7 +152,10 @@ function RecordedFlightChart({
           Kliknij wykres, aby przejść do wybranej sekundy
         </span>
       </div>
-      <div ref={containerRef} className="w-full" />
+      <div
+        ref={containerRef}
+        className="w-full min-h-[220px] sm:min-h-[260px]"
+      />
     </div>
   );
 }
